@@ -1,71 +1,269 @@
 import React, { useState } from "react";
-import { User, ChevronLeft } from "lucide-react";
+import { Search, Pencil, Trash2, Plus, X } from "lucide-react";
+import {
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+} from "../lib/api.js";
 import { money } from "../lib/utils.js";
 
-// Customers screen: list view + detail view.
-// Customers are added automatically from POSView, no manual add here.
 export default function CustomersView({ customers, sales }) {
-  const [selected, setSelected] = useState(null);
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(null);
 
-  const historyFor = (id) => sales.filter((s) => s.customerId === id);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
 
-  if (selected) {
-    const c = customers.find((x) => x.id === selected);
-    const hist = historyFor(selected);
-    const totalSpent = hist.reduce((sum, s) => sum + s.total, 0);
+  const filteredCustomers = customers.filter((customer) => {
+    const value = search.toLowerCase();
 
     return (
-      <div>
-        <button className="back-link" onClick={() => setSelected(null)}>
-          <ChevronLeft size={16} /> Back to customers
-        </button>
+      (customer.name || "").toLowerCase().includes(value) ||
+      (customer.phone || "").toLowerCase().includes(value)
+    );
+  });
 
-        <div className="customer-detail-card">
-          <div className="customer-name" style={{ fontSize: 16 }}>{c.name}</div>
-          <div className="customer-sub">{c.phone || "No phone on file"}</div>
-          <div className="customer-sub" style={{ marginTop: 6, color: "#B8892B", fontWeight: 600 }}>
-            Total spent: {money(totalSpent)} across {hist.length} visit(s)
+  const getCustomerSales = (customerId) => {
+    return sales.filter((sale) => {
+      if (!sale.customer) return false;
+
+      const saleCustomerId =
+        typeof sale.customer === "object"
+          ? sale.customer._id
+          : sale.customer;
+
+      return saleCustomerId === customerId;
+    });
+  };
+
+  const openCreateForm = () => {
+    setEditingCustomer(null);
+    setName("");
+    setPhone("");
+    setAddress("");
+    setShowForm(true);
+  };
+
+  const openEditForm = (customer) => {
+    setEditingCustomer(customer);
+    setName(customer.name || "");
+    setPhone(customer.phone || "");
+    setAddress(customer.address || "");
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingCustomer(null);
+    setName("");
+    setPhone("");
+    setAddress("");
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!name.trim()) {
+      alert("Customer name is required");
+      return;
+    }
+
+    try {
+      const customerData = {
+        name: name.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+      };
+
+      if (editingCustomer) {
+        const response = await updateCustomer(
+          editingCustomer._id,
+          customerData
+        );
+
+        if (!response.success) {
+          alert(response.message || "Failed to update customer");
+          return;
+        }
+
+        window.location.reload();
+      } else {
+        const response = await createCustomer(customerData);
+
+        if (!response.success) {
+          alert(response.message || "Failed to create customer");
+          return;
+        }
+
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error("Customer operation failed:", error);
+      alert("Something went wrong");
+    }
+  };
+
+  const handleDelete = async (id) => {
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this customer?"
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      const response = await deleteCustomer(id);
+
+      if (!response.success) {
+        alert(response.message || "Failed to delete customer");
+        return;
+      }
+
+      window.location.reload();
+    } catch (error) {
+      console.error("Delete customer failed:", error);
+      alert("Failed to delete customer");
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div>
+          <div className="card-title">Customers</div>
+          <div className="card-subtitle">
+            Manage your customers
           </div>
         </div>
 
-        <div className="view-title" style={{ fontSize: 14, marginBottom: 8 }}>Purchase history</div>
-        {hist.length === 0 ? (
-          <div className="content-placeholder">No purchases yet.</div>
-        ) : (
-          hist.map((s) => (
-            <div key={s.id} className="history-row">
-              <div>
-                <div className="customer-name">Slip #{s.invoiceNo}</div>
-                <div className="customer-sub">{s.date}</div>
-              </div>
-              <div style={{ fontWeight: 600, color: "#A8441C" }}>{money(s.total)}</div>
-            </div>
-          ))
-        )}
+        <button className="primary-button" onClick={openCreateForm}>
+          <Plus size={17} />
+          Add Customer
+        </button>
       </div>
-    );
-  }
 
-  return (
-    <div>
-      <div className="view-header">
-        <div className="view-title">Customers</div>
-        <div className="view-subtitle">Added automatically when you bill someone</div>
+      <div className="search-box">
+        <Search size={18} />
+        <input
+          type="text"
+          placeholder="Search customer..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
-      <div className="customer-grid">
-        {customers.map((c) => {
-          const hist = historyFor(c.id);
-          return (
-            <button key={c.id} className="customer-card" onClick={() => setSelected(c.id)}>
-              <div className="customer-avatar"><User size={16} color="#B8892B" /></div>
-              <div>
-                <div className="customer-name">{c.name}</div>
-                <div className="customer-sub">{hist.length} purchase(s)</div>
+
+      {showForm && (
+        <div className="customer-form">
+          <div className="form-header">
+            <div>
+              <div className="card-title">
+                {editingCustomer ? "Edit Customer" : "Add Customer"}
               </div>
+            </div>
+
+            <button onClick={closeForm}>
+              <X size={18} />
             </button>
-          );
-        })}
-      </div>
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <div className="form-grid">
+              <div>
+                <label>Name</label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Customer name"
+                />
+              </div>
+
+              <div>
+                <label>Phone</label>
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="Phone number"
+                />
+              </div>
+
+              <div>
+                <label>Address</label>
+                <input
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Address"
+                />
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button type="button" onClick={closeForm}>
+                Cancel
+              </button>
+
+              <button type="submit">
+                {editingCustomer ? "Update Customer" : "Save Customer"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {filteredCustomers.length === 0 ? (
+        <div className="empty-state">
+          No customers found.
+        </div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Address</th>
+                <th>Total Spent</th>
+                <th>Purchases</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredCustomers.map((customer) => {
+                const customerSales = getCustomerSales(customer._id);
+
+                return (
+                  <tr key={customer._id}>
+                    <td>{customer.name}</td>
+                    <td>{customer.phone || "-"}</td>
+                    <td>{customer.address || "-"}</td>
+                    <td>{money(customer.totalSpent || 0)}</td>
+                    <td>{customerSales.length}</td>
+
+                    <td>
+                      <div className="action-buttons">
+                        <button
+                          onClick={() => openEditForm(customer)}
+                          title="Edit"
+                        >
+                          <Pencil size={16} />
+                        </button>
+
+                        <button
+                          onClick={() => handleDelete(customer._id)}
+                          title="Delete"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

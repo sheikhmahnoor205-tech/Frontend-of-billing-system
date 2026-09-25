@@ -1,171 +1,335 @@
 import React, { useState } from "react";
-import { Trash2, Edit3, Eye, Plus, Save, X } from "lucide-react";
-import { uid, money, dateParts } from "../lib/utils.js";
+import { Pencil, Trash2, Eye } from "lucide-react";
+import { money } from "../lib/utils.js";
+import { updateSale, deleteSale } from "../lib/api.js";
 import BarcodeDisplay from "./BarcodeDisplay.jsx";
 
-// One sale being edited inline: lets you change customer info, payment
-// method, and the item list (add/remove items), then recalculates the total.
 function EditSaleForm({ sale, onSave, onCancel }) {
-  const [customerName, setCustomerName] = useState(sale.customerName);
+  const [customerName, setCustomerName] = useState(sale.customerName || "");
   const [customerPhone, setCustomerPhone] = useState(sale.customerPhone || "");
-  const [paymentMethod, setPaymentMethod] = useState(sale.paymentMethod);
-  const [items, setItems] = useState(sale.items);
+  const [paymentMethod, setPaymentMethod] = useState(
+    sale.paymentMethod || "Cash"
+  );
+  const [items, setItems] = useState(
+    (sale.items || []).map((item) => ({
+      ...item,
+      id: item.id || crypto.randomUUID(),
+    }))
+  );
 
-  const [itemName, setItemName] = useState("");
-  const [itemRate, setItemRate] = useState("");
-  const [itemQty, setItemQty] = useState("");
-  const [itemUnit, setItemUnit] = useState("Gaz");
+  const updateItem = (id, field, value) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
 
-  const addItem = () => {
-    if (!itemName.trim() || !itemRate || !itemQty) return;
-    setItems((prev) => [
-      ...prev,
-      { id: uid(), name: itemName.trim(), rate: Number(itemRate), qty: Number(itemQty), unit: itemUnit },
-    ]);
-    setItemName(""); setItemRate(""); setItemQty("");
+        const updated = {
+          ...item,
+          [field]:
+            field === "qty" || field === "rate" ? Number(value) : value,
+        };
+
+        updated.total = Number(updated.qty || 0) * Number(updated.rate || 0);
+
+        return updated;
+      })
+    );
   };
 
-  const removeItem = (id) => setItems((prev) => prev.filter((i) => i.id !== id));
-
-  const total = items.reduce((s, i) => s + i.rate * i.qty, 0);
-
-  const save = () => {
-    if (!customerName.trim() || items.length === 0) return;
+  const handleSave = () => {
     onSave({
       ...sale,
-      customerName: customerName.trim(),
-      customerPhone: customerPhone.trim(),
+      customerName,
+      customerPhone,
       paymentMethod,
       items,
-      total,
     });
   };
 
   return (
-    <div className="form-card">
-      <div className="add-customer-form" style={{ marginBottom: 12 }}>
-        <input className="form-input" placeholder="Customer name *" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-        <input className="form-input" placeholder="Phone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
-        <select className="unit-select" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
-          <option>Cash</option>
-          <option>Card</option>
-          <option>Bank Transfer</option>
-        </select>
-      </div>
-
-      {items.map((i) => (
-        <div key={i.id} className="cart-row">
-          <div style={{ flex: 1 }}>
-            <div className="cart-row-name">{i.name}</div>
-            <div className="cart-row-price">{i.qty} {i.unit} × {money(i.rate)} = {money(i.qty * i.rate)}</div>
-          </div>
-          <button className="icon-btn" onClick={() => removeItem(i.id)}><Trash2 size={14} color="#AC2B22" /></button>
+    <div className="card">
+      <div className="card-header">
+        <div>
+          <div className="card-title">Edit Sale</div>
+          <div className="card-subtitle">{sale.invoiceNo}</div>
         </div>
-      ))}
-
-      <div className="item-entry-form" style={{ marginTop: 12, marginBottom: 12 }}>
-        <input className="form-input" placeholder="Item name" value={itemName} onChange={(e) => setItemName(e.target.value)} />
-        <input className="form-input" type="number" placeholder="Rate" value={itemRate} onChange={(e) => setItemRate(e.target.value)} />
-        <input className="form-input" type="number" step="0.1" placeholder="Qty" value={itemQty} onChange={(e) => setItemQty(e.target.value)} />
-        <select className="unit-select" value={itemUnit} onChange={(e) => setItemUnit(e.target.value)}>
-          <option>Gaz</option>
-          <option>Meter</option>
-          <option>Piece</option>
-          <option>Set</option>
-        </select>
-        <button className="add-item-btn" onClick={addItem}><Plus size={15} /></button>
       </div>
 
-      <div className="totals-row grand" style={{ marginBottom: 12 }}>
-        <span>New Total</span><span>{money(total)}</span>
+      <div className="form-grid">
+        <div>
+          <label>Customer Name</label>
+          <input
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label>Customer Phone</label>
+          <input
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+          />
+        </div>
+
+        <div>
+          <label>Payment Method</label>
+          <select
+            value={paymentMethod}
+            onChange={(e) => setPaymentMethod(e.target.value)}
+          >
+            <option value="Cash">Cash</option>
+            <option value="Card">Card</option>
+            <option value="Online">Online</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Rate</th>
+              <th>Qty</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id}>
+                <td>
+                  <input
+                    value={item.name || ""}
+                    onChange={(e) =>
+                      updateItem(item.id, "name", e.target.value)
+                    }
+                  />
+                </td>
+
+                <td>
+                  <input
+                    type="number"
+                    value={item.rate || 0}
+                    onChange={(e) =>
+                      updateItem(item.id, "rate", e.target.value)
+                    }
+                  />
+                </td>
+
+                <td>
+                  <input
+                    type="number"
+                    value={item.qty || 0}
+                    onChange={(e) =>
+                      updateItem(item.id, "qty", e.target.value)
+                    }
+                  />
+                </td>
+
+                <td>{money(item.total || 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div className="form-actions">
-        <button className="btn-primary" onClick={save}><Save size={14} /> Save changes</button>
-        <button className="btn-secondary" onClick={onCancel}><X size={14} /> Cancel</button>
+        <button onClick={onCancel}>Cancel</button>
+        <button onClick={handleSave}>Save Changes</button>
       </div>
     </div>
   );
 }
 
 export default function HistoryView({ sales, setSales, onView }) {
-  const [year, setYear] = useState("All");
-  const [month, setMonth] = useState("All");
-  const [day, setDay] = useState("All");
-  const [editingId, setEditingId] = useState(null);
+  const [editingSale, setEditingSale] = useState(null);
+  const [year, setYear] = useState("");
+  const [month, setMonth] = useState("");
+  const [day, setDay] = useState("");
 
-  const withParts = sales.map((s) => ({ ...s, ...dateParts(s.dateISO || s.date) }));
+  const filteredSales = sales.filter((sale) => {
+    if (!sale.dateISO) return true;
 
-  const years = ["All", ...new Set(withParts.map((s) => s.year))].sort();
-  const months = ["All", ...new Set(
-    withParts.filter((s) => year === "All" || s.year === year).map((s) => s.month)
-  )].sort((a, b) => (a === "All" ? -1 : a - b));
-  const days = ["All", ...new Set(
-    withParts
-      .filter((s) => (year === "All" || s.year === year) && (month === "All" || s.month === month))
-      .map((s) => s.day)
-  )].sort((a, b) => (a === "All" ? -1 : a - b));
+    const date = new Date(sale.dateISO);
 
-  const filtered = withParts
-    .filter((s) => year === "All" || s.year === year)
-    .filter((s) => month === "All" || s.month === month)
-    .filter((s) => day === "All" || s.day === day);
+    if (year && date.getFullYear().toString() !== year) return false;
 
-  const monthName = (m) => new Date(2000, m - 1, 1).toLocaleString("en-PK", { month: "short" });
+    if (month && (date.getMonth() + 1).toString() !== month) return false;
 
-  const handleDelete = (id) => {
-    if (window.confirm("Delete this bill? This cannot be undone.")) {
-      setSales((prev) => prev.filter((s) => s.id !== id));
+    if (day && date.getDate().toString() !== day) return false;
+
+    return true;
+  });
+
+  const handleDelete = async (id) => {
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this sale?"
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      const response = await deleteSale(id);
+
+      if (!response.success) {
+        alert(response.message || "Failed to delete sale");
+        return;
+      }
+
+      setSales((prev) => prev.filter((sale) => sale._id !== id));
+    } catch (error) {
+      console.error("Delete failed:", error);
+      alert("Failed to delete sale");
     }
   };
 
-  const handleSaveEdit = (updated) => {
-    setSales((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-    setEditingId(null);
+  const handleUpdate = async (updatedSale) => {
+    try {
+      const response = await updateSale(updatedSale._id, {
+        customerName: updatedSale.customerName,
+        customerPhone: updatedSale.customerPhone,
+        paymentMethod: updatedSale.paymentMethod,
+        items: updatedSale.items,
+        discount: updatedSale.discount || 0,
+        tax: updatedSale.tax || 0,
+        notes: updatedSale.notes || "",
+      });
+
+      if (!response.success) {
+        alert(response.message || "Failed to update sale");
+        return;
+      }
+
+      setSales((prev) =>
+        prev.map((sale) =>
+          sale._id === updatedSale._id ? response.data : sale
+        )
+      );
+
+      setEditingSale(null);
+    } catch (error) {
+      console.error("Update failed:", error);
+      alert("Failed to update sale");
+    }
   };
 
-  return (
-    <div>
-      <div className="view-title" style={{ marginBottom: 12 }}>Sales History</div>
+  if (editingSale) {
+    return (
+      <EditSaleForm
+        sale={editingSale}
+        onSave={handleUpdate}
+        onCancel={() => setEditingSale(null)}
+      />
+    );
+  }
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <select className="form-input" value={year} onChange={(e) => { setYear(e.target.value === "All" ? "All" : Number(e.target.value)); setMonth("All"); setDay("All"); }}>
-          {years.map((y) => <option key={y} value={y}>{y === "All" ? "Year: All" : y}</option>)}
-        </select>
-        <select className="form-input" value={month} onChange={(e) => { setMonth(e.target.value === "All" ? "All" : Number(e.target.value)); setDay("All"); }}>
-          {months.map((m) => <option key={m} value={m}>{m === "All" ? "Month: All" : monthName(m)}</option>)}
-        </select>
-        <select className="form-input" value={day} onChange={(e) => setDay(e.target.value === "All" ? "All" : Number(e.target.value))}>
-          {days.map((d) => <option key={d} value={d}>{d === "All" ? "Day: All" : d}</option>)}
-        </select>
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div>
+          <div className="card-title">Sales History</div>
+          <div className="card-subtitle">
+            View, edit and delete sales
+          </div>
+        </div>
+
+        <div className="filters">
+          <select value={year} onChange={(e) => setYear(e.target.value)}>
+            <option value="">All Years</option>
+            {[...new Set(
+              sales
+                .filter((sale) => sale.dateISO)
+                .map((sale) => new Date(sale.dateISO).getFullYear())
+            )].map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+
+          <select value={month} onChange={(e) => setMonth(e.target.value)}>
+            <option value="">All Months</option>
+            {Array.from({ length: 12 }, (_, index) => (
+              <option key={index + 1} value={index + 1}>
+                {index + 1}
+              </option>
+            ))}
+          </select>
+
+          <select value={day} onChange={(e) => setDay(e.target.value)}>
+            <option value="">All Days</option>
+            {Array.from({ length: 31 }, (_, index) => (
+              <option key={index + 1} value={index + 1}>
+                {index + 1}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="content-placeholder">No bills match this filter.</div>
+      {filteredSales.length === 0 ? (
+        <div className="empty-state">No sales found.</div>
       ) : (
-        [...filtered].reverse().map((s) =>
-          editingId === s.id ? (
-            <EditSaleForm key={s.id} sale={s} onSave={handleSaveEdit} onCancel={() => setEditingId(null)} />
-          ) : (
-            <div key={s.id} className="history-row">
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
-                <div style={{ transform: "scale(0.7)", transformOrigin: "left center" }}>
-                  <BarcodeDisplay value={s.invoiceNo} />
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div className="customer-name">Slip #{s.invoiceNo} — {s.customerName}</div>
-                  <div className="customer-sub">{s.date}</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <span style={{ fontWeight: 600, color: "#A8441C", marginRight: 6 }}>{money(s.total)}</span>
-                <button className="icon-btn" onClick={() => onView(s)} title="View / Print"><Eye size={15} color="#565F6E" /></button>
-                <button className="icon-btn" onClick={() => setEditingId(s.id)} title="Edit"><Edit3 size={15} color="#565F6E" /></button>
-                <button className="icon-btn" onClick={() => handleDelete(s.id)} title="Delete"><Trash2 size={15} color="#AC2B22" /></button>
-              </div>
-            </div>
-          )
-        )
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Date</th>
+                <th>Payment</th>
+                <th>Total</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredSales.map((sale) => (
+                <tr key={sale._id}>
+                  <td>{sale.invoiceNo}</td>
+
+                  <td>
+                    <div>{sale.customerName || "Walk-in Customer"}</div>
+                    <div>{sale.customerPhone || ""}</div>
+                  </td>
+
+                  <td>
+                    {sale.dateISO
+                      ? new Date(sale.dateISO).toLocaleDateString()
+                      : sale.date || ""}
+                  </td>
+
+                  <td>{sale.paymentMethod}</td>
+
+                  <td>{money(sale.total || 0)}</td>
+
+                  <td>
+                    <div className="action-buttons">
+                      <button onClick={() => onView(sale)} title="View">
+                        <Eye size={16} />
+                      </button>
+
+                      <button
+                        onClick={() => setEditingSale(sale)}
+                        title="Edit"
+                      >
+                        <Pencil size={16} />
+                      </button>
+
+                      <button
+                        onClick={() => handleDelete(sale._id)}
+                        title="Delete"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

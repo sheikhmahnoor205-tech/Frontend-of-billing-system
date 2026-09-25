@@ -1,10 +1,23 @@
-import React, { useState, useEffect } from "react";
-import { ShoppingCart, Users, ClipboardList, Store, DollarSign, TrendingUp, ScanLine } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import {
+  ShoppingCart,
+  Users,
+  ClipboardList,
+  Store,
+  DollarSign,
+  TrendingUp,
+  ScanLine,
+} from "lucide-react";
 import "./index.css";
 
-import { uid, todayLabel, todayCode, money } from "./lib/utils.js";
-import { loadKey, saveKey } from "./lib/storage.js";
-import { SHOP, SEED_CUSTOMERS } from "./lib/shopData.js";
+import { money } from "./lib/utils.js";
+import {
+  getCustomers,
+  getSales,
+  getShop,
+  getStats,
+  createSale,
+} from "./lib/api.js";
 
 import StatCard from "./components/StatCard.jsx";
 import NavButton from "./components/NavButton.jsx";
@@ -16,48 +29,65 @@ import VerifyView from "./components/VerifyView.jsx";
 
 export default function App() {
   const [tab, setTab] = useState("pos");
-
-  // Load saved data on first render; fall back to seed data if nothing saved yet
-  const [customers, setCustomers] = useState(() => loadKey("customers", SEED_CUSTOMERS));
-  const [sales, setSales] = useState(() => loadKey("sales", []));
-  const [dailyCounter, setDailyCounter] = useState(() => loadKey("dailyCounter", {})); // { "20260825": 3 }
+  const [customers, setCustomers] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [shop, setShop] = useState(null);
+  const [stats, setStats] = useState(null);
   const [activeReceipt, setActiveReceipt] = useState(null);
 
-  // Save to localStorage every time these change
-  useEffect(() => saveKey("customers", customers), [customers]);
-  useEffect(() => saveKey("sales", sales), [sales]);
-  useEffect(() => saveKey("dailyCounter", dailyCounter), [dailyCounter]);
+  useEffect(() => {
+    loadData();
+  }, []);
 
-  const todaysSales = sales.filter((s) => s.date.split(",")[0] === todayLabel().split(",")[0]);
-  const revenueToday = todaysSales.reduce((s, x) => s + x.total, 0);
+  const loadData = async () => {
+    try {
+      const [customersRes, salesRes, shopRes, statsRes] = await Promise.all([
+        getCustomers(),
+        getSales(),
+        getShop(),
+        getStats(),
+      ]);
 
-  const handleCheckout = (draft) => {
-    const { customerName, customerPhone, ...rest } = draft;
-
-    let customer = customerPhone
-      ? customers.find((c) => c.phone === customerPhone)
-      : customers.find((c) => c.name === "Walk-in Customer" && customerName === "Walk-in Customer");
-
-    if (!customer) {
-      customer = { id: uid(), name: customerName, phone: customerPhone };
-      setCustomers((prev) => [...prev, customer]);
+      setCustomers(customersRes.data || []);
+      setSales(salesRes.data || []);
+      setShop(shopRes.data || null);
+      setStats(statsRes.data || null);
+    } catch (error) {
+      console.error("Failed to load data:", error);
     }
+  };
 
-    // Build a unique, date-based slip number: "20260825-0001"
-    // The counter for today's date increases by 1 each time — never resets on refresh,
-    // and a different day automatically gets a different prefix, so no clashes ever.
-    const code = todayCode();
-    const countSoFar = (dailyCounter[code] || 0) + 1;
-    setDailyCounter((prev) => ({ ...prev, [code]: countSoFar }));
-    const invoiceNo = `${code}-${String(countSoFar).padStart(4, "0")}`;
+  const handleCheckout = async (draft) => {
+    try {
+      const response = await createSale(draft);
 
-    const sale = {
-      id: uid(), invoiceNo, date: todayLabel(), dateISO: new Date().toISOString(),
-      customerId: customer.id, customerName: customer.name, customerPhone: customer.phone,
-      ...rest,
-    };
-    setSales((prev) => [...prev, sale]);
-    setActiveReceipt(sale);
+      if (!response.success) {
+        alert(response.message || "Failed to create sale");
+        return;
+      }
+
+      const sale = response.data;
+
+      setSales((prev) => [...prev, sale]);
+      setActiveReceipt(sale);
+
+      const customersRes = await getCustomers();
+      setCustomers(customersRes.data || []);
+
+      const statsRes = await getStats();
+      setStats(statsRes.data || null);
+    } catch (error) {
+      console.error("Checkout failed:", error);
+      alert("Failed to create bill");
+    }
+  };
+
+  const revenueToday = stats?.kpis?.revenueToday || 0;
+  const billsToday = stats?.kpis?.billsToday || 0;
+
+  const shopData = shop || {
+    name: "Fabrics",
+    address: "",
   };
 
   const NAV = [
@@ -70,36 +100,72 @@ export default function App() {
   return (
     <div className="app-container">
       <div className="header">
-        <div className="logo-box"><Store size={18} color="#FAF6ED" /></div>
+        <div className="logo-box">
+          <Store size={18} color="#FAF6ED" />
+        </div>
+
         <div>
-          <div className="shop-name">{SHOP.name}</div>
-          <div className="shop-sub">{SHOP.address}</div>
+          <div className="shop-name">{shopData.name}</div>
+          <div className="shop-sub">{shopData.address}</div>
         </div>
       </div>
 
-      <div className="stats-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
-        <StatCard icon={DollarSign} label="Revenue today" value={money(revenueToday)} accent="#A8441C" />
-        <StatCard icon={TrendingUp} label="Bills today" value={todaysSales.length} accent="#B8892B" />
+      <div
+        className="stats-grid"
+        style={{ gridTemplateColumns: "repeat(2, 1fr)" }}
+      >
+        <StatCard
+          icon={DollarSign}
+          label="Revenue today"
+          value={money(revenueToday)}
+          accent="#A8441C"
+        />
+
+        <StatCard
+          icon={TrendingUp}
+          label="Bills today"
+          value={billsToday}
+          accent="#B8892B"
+        />
       </div>
 
       <div className="main-grid">
         <div className="sidebar">
           {NAV.map((n) => (
-            <NavButton key={n.id} icon={n.icon} label={n.label} active={tab === n.id} onClick={() => setTab(n.id)} />
+            <NavButton
+              key={n.id}
+              icon={n.icon}
+              label={n.label}
+              active={tab === n.id}
+              onClick={() => setTab(n.id)}
+            />
           ))}
         </div>
 
         <div>
           {tab === "pos" && <POSView onCheckout={handleCheckout} />}
-          {tab === "customers" && <CustomersView customers={customers} sales={sales} />}
-          {tab === "history" && (
-            <HistoryView sales={sales} setSales={setSales} onView={setActiveReceipt} />
+
+          {tab === "customers" && (
+            <CustomersView customers={customers} sales={sales} />
           )}
-          {tab === "verify" && <VerifyView sales={sales} />}
+
+          {tab === "history" && (
+            <HistoryView
+              sales={sales}
+              setSales={setSales}
+              onView={setActiveReceipt}
+            />
+          )}
+
+          {tab === "verify" && <VerifyView />}
         </div>
       </div>
 
-      <ReceiptModal sale={activeReceipt} shop={SHOP} onClose={() => setActiveReceipt(null)} />
+      <ReceiptModal
+        sale={activeReceipt}
+        shop={shopData}
+        onClose={() => setActiveReceipt(null)}
+      />
     </div>
   );
 }
